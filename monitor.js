@@ -18,8 +18,9 @@ const LOGIN_BUTTON_SELECTOR = process.env.LOGIN_BUTTON_SELECTOR;
 const SITE_USERNAME = process.env.SITE_USERNAME;
 const SITE_PASSWORD = process.env.SITE_PASSWORD;
 
-const TARGET_URLS = process.env.TARGET_URLS ? JSON.parse(process.env.TARGET_URLS) : [];
-const KEYWORDS = process.env.KEYWORDS ? JSON.parse(process.env.KEYWORDS) : [];
+const TARGET_URLS = process.env.TARGET_URLS ? process.env.TARGET_URLS.split(",") : [];
+const KEYWORDS = process.env.KEYWORDS ? process.env.KEYWORDS.split(",") : [];
+
 
 
 // ----------------------
@@ -113,4 +114,5 @@ async function run() {
 }
 
 run();
+
 
