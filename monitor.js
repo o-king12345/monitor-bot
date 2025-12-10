@@ -1,131 +1,94 @@
-// monitor.js
-import fetch from 'node-fetch';
-import fs from 'fs';
-import path from 'path';
-import dotenv from 'dotenv';
+import puppeteer from "puppeteer";
+import fetch from "node-fetch";
+import dotenv from "dotenv";
 dotenv.config();
 
 // ----------------------
-// 설정
+// 환경 변수
 // ----------------------
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-const loginUrl = 'https://sexbam42.top';
-const username = process.env.SITE_USERNAME;
-const password = process.env.SITE_PASSWORD;
+const LOGIN_PAGE_URL = process.env.LOGIN_PAGE_URL;   // 수정필요
+const LOGIN_ID_SELECTOR = process.env.LOGIN_ID_SELECTOR; // 수정필요
+const LOGIN_PW_SELECTOR = process.env.LOGIN_PW_SELECTOR; // 수정필요
+const LOGIN_BUTTON_SELECTOR = process.env.LOGIN_BUTTON_SELECTOR; // 수정필요
+const SITE_USERNAME = process.env.SITE_USERNAME;
+const SITE_PASSWORD = process.env.SITE_PASSWORD;
 
-const targetUrls = [
-  'https://sexbam42.top/index.php?mid=sschkiss&category=2827265&document_srl=293483816',
-  'https://sexbam42.top/index.php?mid=sschkiss&category=2827254&document_srl=368834929',
-  'https://sexbam42.top/index.php?mid=sschkiss&category=159596652&document_srl=130133201',
-  'https://sexbam42.top/index.php?mid=sschkiss&category=12782286&document_srl=365408541',
-  'https://sexbam42.top/index.php?mid=sschkiss&category=12782286&document_srl=353563931',
-  'https://sexbam42.top/index.php?mid=sschkiss&category=2827259&document_srl=384663498',
-  'https://sexbam42.top/index.php?mid=sschkiss&category=115731753&document_srl=235444641',
-  'https://sexbam42.top/index.php?mid=sschkiss&category=12782286&document_srl=345076829',
-  'https://sexbam26.top/index.php?mid=sschkiss&category=153551549&document_srl=285322507',
-  'https://sexbam26.top/index.php?mid=sschkiss&category=153551549&document_srl=159598777'
-];
+// 감시할 URL
+const TARGET_URLS = JSON.parse(process.env.TARGET_URLS);
 
-const keywords = ['코코넛','제이니','홍시','은수','솔지','홍유경','도쿄','아바나','봉쥬르','해린','프림','한다람'];
+// 감시 키워드
+const KEYWORDS = JSON.parse(process.env.KEYWORDS);
 
-// 중복 체크 파일
-const ALERT_FILE = path.resolve('./alerted.json');
-let alertedKeywords = {};
-if (fs.existsSync(ALERT_FILE)) {
-  alertedKeywords = JSON.parse(fs.readFileSync(ALERT_FILE, 'utf-8'));
-}
+let alerted = {}; // 중복 방지
 
 // ----------------------
-// 텔레그램 전송 함수
+// 텔레그램 전송
 // ----------------------
-async function sendTelegramMessage(message) {
+async function sendTelegram(msg) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: message })
-    });
-    console.log('Telegram 메시지 전송 완료:', await res.text());
-  } catch (err) {
-    console.log('Telegram 전송 오류:', err);
-  }
+
+  await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: TELEGRAM_CHAT_ID,
+      text: msg
+    })
+  });
 }
 
 // ----------------------
-// 로그인 및 세션 쿠키 가져오기
+// 메인
 // ----------------------
-async function login() {
-  const formData = new URLSearchParams();
-  formData.append('username', username);
-  formData.append('password', password);
-
-  const res = await fetch(loginUrl, {
-    method: 'POST',
-    body: formData,
-    redirect: 'manual'
+async function run() {
+  const browser = await puppeteer.launch({
+    headless: "new",
+    args: ["--no-sandbox", "--disable-setuid-sandbox"]
   });
 
-  const cookies = res.headers.get('set-cookie');
-  if (!cookies) throw new Error('로그인 실패: 쿠키 없음');
-  const sessionCookie = cookies.split(';')[0];
-  console.log('로그인 성공, 세션쿠키:', sessionCookie);
-  return sessionCookie;
-}
+  const page = await browser.newPage();
 
-// ----------------------
-// HTML에서 제목 추출
-// ----------------------
-function extractTitle(html) {
-  const match = html.match(/<title>(.*?)<\/title>/);
-  return match ? match[1].trim() : '';
-}
-
-// ----------------------
-// 페이지 체크
-// ----------------------
-async function checkPages() {
   try {
-    const sessionCookie = await login();
+    // 1) 로그인 페이지 이동
+    await page.goto(LOGIN_PAGE_URL, { waitUntil: "networkidle2" });
 
-    for (const url of targetUrls) {
+    // 2) ID/PW 입력
+    await page.type(LOGIN_ID_SELECTOR, SITE_USERNAME);
+    await page.type(LOGIN_PW_SELECTOR, SITE_PASSWORD);
+
+    // 3) 로그인 버튼 클릭
+    await page.click(LOGIN_BUTTON_SELECTOR);
+    await page.waitForNavigation({ waitUntil: "networkidle2" });
+
+    console.log("로그인 성공");
+
+    // 4) 감시 대상 페이지 반복
+    for (const url of TARGET_URLS) {
       try {
-        const res = await fetch(url, {
-          headers: { 'Cookie': sessionCookie }
-        });
+        await page.goto(url, { waitUntil: "networkidle2", timeout: 15000 });
 
-        if (!res.ok) {
-          console.log(`페이지 요청 실패 (${res.status}):`, url);
-          continue;
-        }
+        const title = await page.title();
+        console.log("페이지:", url, "제목:", title);
 
-        const html = await res.text();
-        const title = extractTitle(html);
-        console.log('페이지 제목:', title);
-
-        // 키워드 체크
-        for (const kw of keywords) {
-          if (title.includes(kw) && alertedKeywords[url] !== title) {
-            await sendTelegramMessage(`🔔 ${kw} 감지!\n제목: ${title}\n링크: ${url}`);
-            alertedKeywords[url] = title;
+        for (const kw of KEYWORDS) {
+          if (title.includes(kw) && alerted[url] !== title) {
+            await sendTelegram(`🔔 키워드 감지: ${kw}\n제목: ${title}\nURL: ${url}`);
+            alerted[url] = title;
           }
         }
-      } catch (err) {
-        console.log('페이지 요청 에러:', url, err.message);
+      } catch (e) {
+        console.log(`페이지 실패: ${url}`, e.message);
       }
     }
-
-    // 중복 저장
-    fs.writeFileSync(ALERT_FILE, JSON.stringify(alertedKeywords, null, 2));
-
-  } catch (err) {
-    console.log('로그인/스크립트 오류:', err.message);
+  } catch (e) {
+    console.log("스크립트 오류:", e);
   }
+
+  await browser.close();
+  console.log("작업 완료");
 }
 
-// ----------------------
-// 실행
-// ----------------------
-checkPages();
+run();
